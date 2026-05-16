@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- 第一个人 -->
+  <circle cx="6" cy="6" r="2.5"/>
+  <path d="M2 15c0-2 1.6-3.5 3.5-3.5S9 13 9 15"/>
+  <!-- 第二个人 -->
+  <circle cx="14" cy="6" r="2.5"/>
+  <path d="M10 15c0-2 1.6-3.5 3.5-3.5S17 13 17 15"/>
+  <!-- 加号 -->
+  <line x1="21" y1="11" x2="21" y2="15"/>
+  <line x1="19" y1="13" x2="23" y2="13"/>
+</svg>
