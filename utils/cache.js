@@ -133,7 +133,7 @@ async function validateDatabase() {
 		// 与服务器进行校验
 		try {
 			const response = await uni.request({
-				url: 'https://chat.hyacine.com.cn/chat/api.php',
+				url: 'https://chat.modern-chat.top/chat/api-pc.php',
 				method: 'POST',
 			header: {
 					'Content-Type': 'application/x-www-form-urlencoded',

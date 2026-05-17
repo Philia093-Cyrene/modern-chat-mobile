@@ -1,5 +1,5 @@
 const API_BASE_URL_KEY = "api_base_url";
-const DEFAULT_API_URL = "https://chat.hyacine.com.cn/chat/api.php";
+const DEFAULT_API_URL = "https://chat.modern-chat.top/chat/api-pc.php";
 
 const requestCache = new Map();
 const pendingRequests = new Map();

@@ -186,7 +186,7 @@ import { APP_VERSION, APP_VERSION_CODE } from '@/utils/version.js'
 import theme from '@/utils/theme.js'
 
 const PRESET_SERVERS = [
-	{ id: 'default', name: '默认服务器', url: 'https://chat.hyacine.com.cn/chat' },
+	{ id: 'default', name: '默认服务器', url: 'https://chat.modern-chat.top/chat' },
 	{ id: 'custom', name: '自定义服务器', url: '' }
 ]
 
@@ -223,7 +223,7 @@ export default {
 	computed: {
 		displayServerUrl() {
 			if (this.selectedServerId === 'default') {
-				return 'https://chat.hyacine.com.cn/chat/api.php'
+				return 'https://chat.modern-chat.top/chat/api-pc.php'
 			}
 			return getApiBaseUrl()
 		},
