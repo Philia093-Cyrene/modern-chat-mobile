@@ -26,6 +26,10 @@
 						<text>扫码登录网页端</text>
 						<text class="item-arrow">›</text>
 					</view>
+					<view class="profile-drawer-item" @click="openDeviceManager">
+						<text>设备管理</text>
+						<text class="item-arrow">›</text>
+					</view>
 					<view class="profile-drawer-item version-item" @click="checkUpdate">
 						<text>检查更新</text>
 						<text class="version-badge">{{ appVersion }}</text>
@@ -229,7 +233,7 @@
 						<text>{{ msg.sender_name ? msg.sender_name.charAt(0).toUpperCase() : 'U' }}</text>
 					</view>
 					<view class="message-content">
-						<view class="message-sender" v-if="currentChat.type === 'group' && msg.sender_id != userId">
+						<view class="message-sender" v-if="currentChat.type === 'group' && msg.sender_id != userId && !isContentContainsSenderName(msg)">
 							{{ msg.sender_name }}
 						</view>
 						<view v-if="msg.recalled" class="message-recalled">
@@ -292,7 +296,7 @@
 							</view>
 						</view>
 						<view v-else class="message-text">
-							<text v-for="(part, index) in parseMessageContent(msg.content)" :key="index" 
+							<text v-for="(part, index) in parseMessageContent(getMessageContent(msg))" :key="index" 
 								:class="{ 'message-link': part.type === 'link' }"
 								@tap="part.type === 'link' && handleLinkClick(part.content)">
 								{{ part.content }}
@@ -651,10 +655,10 @@
 				</view>
 				
 				<view class="scan-login-success" v-if="scanLoginSuccess">
-					<text class="success-icon">✓</text>
-					<text class="success-text">登录成功！</text>
-					<text class="success-hint">网页端已成功登录</text>
-				</view>
+				<text class="success-icon">✓</text>
+				<text class="success-text">登录成功！</text>
+				<text class="success-hint">已在{{ scanLoginDeviceType || '网页端' }}登录</text>
+			</view>
 			</view>
 		</view>
 		
@@ -766,6 +770,53 @@
 		</view>
 		
 		<canvas canvas-id="photoScanCanvas" class="hidden-canvas" :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }"></canvas>
+		
+		<!-- 设备管理弹窗 -->
+		<view class="popup-overlay" v-if="showDeviceManager" @click="showDeviceManager = false"></view>
+		<view class="popup device-manager-popup" :class="{ open: showDeviceManager }">
+			<view class="popup-header">
+				<text class="popup-title">设备管理</text>
+				<view class="popup-close" @click="showDeviceManager = false">✕</view>
+			</view>
+			<view class="popup-content">
+				<scroll-view scroll-y class="device-manager-scroll">
+					<view class="device-manager-loading" v-if="deviceManagerLoading">
+						<text>加载中...</text>
+					</view>
+					<view class="device-list" v-else>
+						<view 
+							class="device-item" 
+							v-for="session in deviceSessions" 
+							:key="session.id"
+						>
+							<view class="device-info">
+								<view class="device-icon" :class="session.device_type.toLowerCase()">
+									<text v-if="session.device_type === 'PC'">💻</text>
+									<text v-else-if="session.device_type === 'Web'">🌐</text>
+									<text v-else>📱</text>
+								</view>
+								<view class="device-details">
+									<text class="device-name">{{ this.getDeviceTypeName(session.device_type) }}</text>
+									<text class="device-time">登录时间: {{ session.login_time }}</text>
+									<text class="device-ip" v-if="session.ip_address">{{ session.ip_address }}</text>
+								</view>
+							</view>
+							<view class="device-actions">
+								<view 
+									class="device-logout-btn" 
+									@click="handleDeviceLogout(session.id)"
+								>
+									<text>退出登录</text>
+								</view>
+							</view>
+						</view>
+						<view class="empty-state" v-if="deviceSessions.length === 0">
+							<text>暂无其他登录设备</text>
+						</view>
+					</view>
+				</scroll-view>
+			</view>
+		</view>
 	</view>
 </template>
 
@@ -860,6 +911,7 @@ export default {
 			scanLoginLoadingText: '',
 			scanLoginError: '',
 			scanLoginSuccess: false,
+			scanLoginDeviceType: '',
 			showColorPalette: false,
 			currentColorTheme: 'default-blue',
 			themeList: [],
@@ -873,7 +925,12 @@ export default {
 			canvasWidth: 600,
 			canvasHeight: 600,
 			// 用于跟踪已显示过通知的消息ID，避免重复显示
-			notifiedMessageIds: new Set()
+			notifiedMessageIds: new Set(),
+			// 设备会话管理
+			showDeviceManager: false,
+			deviceSessions: [],
+			currentSessionToken: '',
+			deviceManagerLoading: false
 		}
 	},
 	
@@ -1455,6 +1512,11 @@ export default {
 		async loadMessages() {
 			if (!this.currentChat) return
 			
+			const chatKey = `${this.currentChat.type}_${this.currentChat.id}`
+			const lastLoadVersion = uni.getStorageSync(`last_load_version_${chatKey}`)
+			const currentAppVersion = APP_VERSION
+			const isFirstLoad = !lastLoadVersion || lastLoadVersion !== currentAppVersion
+			
 			// 首先从缓存加载
 			const cached = cache.getMessages(this.currentChat.id, this.currentChat.type)
 			let lastTime = '1970-01-01 00:00:00'
@@ -1469,7 +1531,8 @@ export default {
 					}
 				})
 				// 获取最后一条消息的时间作为增量加载的起点
-				lastTime = cached[cached.length - 1].created_at || lastTime
+				const sortedCached = [...cached].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+				lastTime = sortedCached[0]?.created_at || lastTime
 				
 				this.$nextTick(() => {
 					this.scrollToBottom()
@@ -1479,35 +1542,8 @@ export default {
 			}
 			
 			try {
-				// 使用 poll 接口增量获取新消息
-				const pollRes = await api.messages.poll(lastTime, this.currentChat.type, this.currentChat.id)
-				
-				if (pollRes.data && pollRes.data.messages && pollRes.data.messages.length > 0) {
-					const newMessages = pollRes.data.messages.map(msg => {
-						const senderId = parseInt(msg.sender_id, 10)
-						return {
-							...msg,
-							sender_id: isNaN(senderId) ? null : senderId,
-							sender_name: msg.sender_name || msg.sender_username || ''
-						}
-					})
-					
-					// 合并消息并去重
-					const existingIds = new Set(this.messages.map(m => String(m.id)))
-					const uniqueNewMessages = newMessages.filter(m => !existingIds.has(String(m.id)))
-					
-					this.messages = [...this.messages, ...uniqueNewMessages]
-					
-					// 保存到缓存
-					cache.setMessages(this.currentChat.id, this.currentChat.type, this.messages)
-					
-					this.$nextTick(() => {
-						this.scrollToBottom()
-					})
-					
-					this.preloadVideos(uniqueNewMessages)
-				} else if (!cached || cached.length === 0) {
-					// 如果缓存为空，且 poll 没有返回新消息，才获取完整历史
+				// 如果是首次加载或版本更新，直接获取完整历史
+				if (isFirstLoad) {
 					let res
 					if (this.currentChat.type === 'friend') {
 						res = await api.messages.history(this.currentChat.id)
@@ -1515,7 +1551,7 @@ export default {
 						res = await api.groups.messages(this.currentChat.id)
 					}
 					
-					this.messages = (res.data || []).map(msg => {
+					const newMessages = (res.data || []).map(msg => {
 						const senderId = parseInt(msg.sender_id, 10)
 						return {
 							...msg,
@@ -1524,13 +1560,44 @@ export default {
 						}
 					})
 					
-					cache.setMessages(this.currentChat.id, this.currentChat.type, res.data || [])
+					this.messages = newMessages
+					cache.setMessages(this.currentChat.id, this.currentChat.type, newMessages)
+					uni.setStorageSync(`last_load_version_${chatKey}`, currentAppVersion)
 					
 					this.$nextTick(() => {
 						this.scrollToBottom()
 					})
 					
-					this.preloadVideos(res.data || [])
+					this.preloadVideos(newMessages)
+				} else {
+					// 使用 poll 接口增量获取新消息
+					const pollRes = await api.messages.poll(lastTime, this.currentChat.type, this.currentChat.id)
+					
+					if (pollRes.data && pollRes.data.messages && pollRes.data.messages.length > 0) {
+						const newMessages = pollRes.data.messages.map(msg => {
+							const senderId = parseInt(msg.sender_id, 10)
+							return {
+								...msg,
+								sender_id: isNaN(senderId) ? null : senderId,
+								sender_name: msg.sender_name || msg.sender_username || ''
+							}
+						})
+						
+						// 合并消息并去重（使用消息ID）
+						const existingIds = new Set(this.messages.map(m => String(m.id)))
+						const uniqueNewMessages = newMessages.filter(m => !existingIds.has(String(m.id)))
+						
+						this.messages = [...this.messages, ...uniqueNewMessages]
+						
+						// 保存到缓存
+						cache.setMessages(this.currentChat.id, this.currentChat.type, this.messages)
+						
+						this.$nextTick(() => {
+							this.scrollToBottom()
+						})
+						
+						this.preloadVideos(uniqueNewMessages)
+					}
 				}
 				
 				this.messages.forEach(msg => {
@@ -2669,6 +2736,22 @@ export default {
 				.replace(/'/g, '&#039;')
 		},
 		
+		isContentContainsSenderName(msg) {
+			if (!msg.content || !msg.sender_name) return false
+			const senderName = msg.sender_name.trim()
+			return msg.content.startsWith(senderName + ':') || 
+				   msg.content.startsWith(senderName + '：')
+		},
+		
+		getMessageContent(msg) {
+			if (!msg.content) return ''
+			if (!msg.sender_name) return msg.content
+			
+			const senderName = msg.sender_name.trim()
+			const colonPattern = new RegExp('^' + senderName + '[:：]\\s*')
+			return msg.content.replace(colonPattern, '')
+		},
+		
 		parseMessageContent(text) {
 			if (!text) return [{ type: 'text', content: '' }]
 			
@@ -3396,10 +3479,43 @@ export default {
 			this.scanLoginError = ''
 			
 			try {
-				await api.scanLogin.confirm(this.scanLoginInfo.qid, vkey)
+				const confirmRes = await api.scanLogin.confirm(this.scanLoginInfo.qid, vkey)
 				this.scanLoginLoading = false
 				this.scanLoginSuccess = true
+				
+				// 确定登录的设备类型
+				const qrUrl = this.scanLoginInfo?.qrUrl || ''
+				if (qrUrl.includes('CHAT-EXE') || qrUrl.includes('pc')) {
+					this.scanLoginDeviceType = 'PC客户端'
+				} else {
+					this.scanLoginDeviceType = '网页端'
+				}
+				
 				this.scanLoginInfo = null
+				
+				// 获取服务器返回的access_key
+				const accessKey = confirmRes.data?.access_key || ''
+				console.log('扫码登录确认成功，获取到access_key:', accessKey ? accessKey.substring(0, 20) + '...' : '无')
+				
+				// 如果手机端APP尚未登录，使用access_key登录
+				if ((!this.userId || !this.userInfo || Object.keys(this.userInfo).length === 0) && accessKey) {
+					try {
+						console.log('使用access_key进行自动登录...')
+						const userInfoRes = await api.scanLogin.userinfo(vkey)
+						if (userInfoRes.success && userInfoRes.data && userInfoRes.data.user) {
+							const user = userInfoRes.data.user
+							// 保存用户信息和登录状态
+							uni.setStorageSync('userInfo', user)
+							uni.setStorageSync('isLoggedIn', true)
+							uni.setStorageSync('access_key', accessKey)
+							this.userInfo = user
+							this.userId = parseInt(user.id, 10)
+							console.log('手机端APP通过access_key自动登录成功:', user)
+						}
+					} catch (e) {
+						console.log('自动登录失败:', e)
+					}
+				}
 				
 				setTimeout(() => {
 					this.showScanLogin = false
@@ -3429,6 +3545,71 @@ export default {
 		retryScanLogin() {
 			this.scanLoginError = ''
 			this.openScanLogin()
+		},
+		
+		// 设备管理相关方法
+		async openDeviceManager() {
+			this.showDeviceManager = true
+			this.deviceManagerLoading = true
+			this.deviceSessions = []
+			
+			try {
+				const vkey = uni.getStorageSync('vkey')
+				if (!vkey) {
+					this.showToast('请先登录')
+					this.showDeviceManager = false
+					return
+				}
+				
+				const res = await api.deviceSession.list(vkey)
+				if (res.success && res.data && res.data.sessions) {
+					this.deviceSessions = res.data.sessions
+				}
+			} catch (e) {
+				console.error('获取设备列表失败:', e)
+				this.showToast('获取设备列表失败')
+			} finally {
+				this.deviceManagerLoading = false
+			}
+		},
+		
+		getDeviceTypeName(deviceType) {
+			const typeMap = {
+				'PC': 'PC客户端',
+				'Web': '网页端',
+				'Mobile': '手机端'
+			}
+			return typeMap[deviceType] || deviceType
+		},
+		
+		async handleDeviceLogout(sessionId) {
+			uni.showModal({
+				title: '确认退出',
+				content: '确定要强制退出该设备的登录吗？',
+				success: async (res) => {
+					if (res.confirm) {
+						try {
+							const vkey = uni.getStorageSync('vkey')
+							if (!vkey) {
+								this.showToast('请先登录')
+								return
+							}
+							
+							const result = await api.deviceSession.logout(vkey, sessionId)
+							if (result.success) {
+								this.showToast('已强制退出该设备')
+								// 刷新设备列表
+								this.openDeviceManager()
+							} else {
+								this.showToast(result.message || '操作失败')
+							}
+						} catch (e) {
+							console.error('退出设备登录失败:', e)
+							this.showToast('操作失败')
+						}
+					}
+				}
+			})
 		},
 		
 		getAvatarUrl(avatar) {

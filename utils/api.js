@@ -1,5 +1,5 @@
 const API_BASE_URL_KEY = "api_base_url";
-const DEFAULT_API_URL = "https://chat.modern-chat.top/chat/api-pc.php";
+const DEFAULT_API_URL = "https://chat.modern-chat.top/chat/api.php";
 
 const requestCache = new Map();
 const pendingRequests = new Map();
@@ -11,6 +11,7 @@ let lastRequestTime = 0;
 const MIN_REQUEST_INTERVAL = 500;
 const MAX_CONCURRENT_REQUESTS = 2;
 let activeRequests = 0;
+const REQUEST_TIMEOUT = 15000; // 请求超时时间：15秒
 
 export function getApiBaseUrl() {
   try {
@@ -70,7 +71,6 @@ async function processQueue() {
 }
 
 function executeRequest(options) {
-  const baseUrl = getApiBaseUrl();
   const {
     resource,
     action,
@@ -78,7 +78,11 @@ function executeRequest(options) {
     method = "POST",
     skipCache = false,
     retryCount = 0,
+    customUrl = null,
   } = options;
+  
+  // 使用自定义URL或默认URL
+  const baseUrl = customUrl || getApiBaseUrl();
 
   const cacheKey = `${resource}:${action}:${JSON.stringify(data)}`;
 
@@ -109,15 +113,24 @@ function executeRequest(options) {
       retryCount,
     });
 
+    // 超时处理
+    const timeoutTimer = setTimeout(() => {
+      console.log("API 请求超时:", cacheKey);
+      reject({ message: "请求超时，请检查网络连接或稍后重试" });
+      pendingRequests.delete(cacheKey);
+    }, REQUEST_TIMEOUT);
+
     uni.request({
       url: baseUrl,
       method,
       data: requestData,
       header: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        "Content-Type": "application/json; charset=utf-8",
       },
       withCredentials: true,
+      timeout: REQUEST_TIMEOUT,
       success: (res) => {
+        clearTimeout(timeoutTimer);
         console.log("API 响应:", res.statusCode, res.data);
 
         if (res.statusCode === 200) {
@@ -152,10 +165,12 @@ function executeRequest(options) {
         reject({ message: typeof msg === "string" ? msg : "请求失败" });
       },
       fail: (err) => {
+        clearTimeout(timeoutTimer);
         console.log("API 请求失败:", err);
         reject({ message: err.errMsg || "网络错误，请检查网络连接" });
       },
       complete: () => {
+        clearTimeout(timeoutTimer);
         pendingRequests.delete(cacheKey);
       },
     });
@@ -625,6 +640,15 @@ const scanLogin = {
       skipCache: true,
     });
   },
+
+  userinfo: (vkey) => {
+    return request({
+      resource: "scan_login",
+      action: "userinfo",
+      data: { vkey },
+      skipCache: true,
+    });
+  },
 };
 
 const vkey = {
@@ -647,6 +671,53 @@ const vkey = {
   },
 };
 
+const deviceSession = {
+  create: (userId, deviceType, deviceName) => {
+    return request({
+      resource: "device_session",
+      action: "create",
+      data: { user_id: userId, device_type: deviceType, device_name: deviceName },
+      skipCache: true,
+    });
+  },
+
+  list: (vkey) => {
+    return request({
+      resource: "device_session",
+      action: "list",
+      data: { vkey },
+      skipCache: true,
+    });
+  },
+
+  logout: (vkey, sessionId) => {
+    return request({
+      resource: "device_session",
+      action: "logout",
+      data: { vkey, session_id: sessionId },
+      skipCache: true,
+    });
+  },
+
+  logoutAll: (vkey, currentSessionToken) => {
+    return request({
+      resource: "device_session",
+      action: "logout_all",
+      data: { vkey, current_session_token: currentSessionToken },
+      skipCache: true,
+    });
+  },
+
+  verify: (sessionToken) => {
+    return request({
+      resource: "device_session",
+      action: "verify",
+      data: { session_token: sessionToken },
+      skipCache: true,
+    });
+  },
+};
+
 export default {
   auth,
   sms,
@@ -656,5 +727,6 @@ export default {
   groups,
   scanLogin,
   vkey,
+  deviceSession,
   uploadFile,
 };

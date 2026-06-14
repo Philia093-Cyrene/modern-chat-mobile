@@ -223,7 +223,7 @@ export default {
 	computed: {
 		displayServerUrl() {
 			if (this.selectedServerId === 'default') {
-				return 'https://chat.modern-chat.top/chat/api-pc.php'
+				return 'https://chat.modern-chat.top/chat/api.php'
 			}
 			return getApiBaseUrl()
 		},

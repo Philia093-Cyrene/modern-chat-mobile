@@ -1,6 +1,6 @@
 {
     "name" : "modernchat-app",
-    "appid" : "__UNI__CCB0051",
+    "appid" : "__UNI__08F311F",
     "description" : "发行版",
     "versionName" : "0.7.9",
     "versionCode" : 79,
@@ -25,7 +25,8 @@
             "SQLite" : {},
             "VideoPlayer" : {},
             "Record" : {},
-            "iBeacon" : {}
+            "iBeacon" : {},
+            "Push" : {}
         },
         /* 应用发布信息 */
         "distribute" : {
@@ -61,7 +62,11 @@
                 "statics" : {},
                 "speech" : {},
                 "share" : {},
-                "push" : {},
+                "push" : {
+                    "unipush" : {
+                        "offline" : false
+                    }
+                },
                 "payment" : {},
                 "oauth" : {},
                 "maps" : {}
